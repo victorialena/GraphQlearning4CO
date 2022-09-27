@@ -5,6 +5,7 @@ import argparse
 import dgl
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import timeit
 
 import torch
@@ -133,12 +134,11 @@ def main(args):
     env = jobShopScheduling(njobs, nworkers)
     env.reset()
 
-    #load_from = args.load_from #"jobshop_qf_j25-w15_4x4_multilayer-from_script"
     if args.just_eval:
         assert args.load_from, "No model given to evaluate!"
         print("Evaluating", args.load_from, f"on {args.n_samples} sample instances.")
         qf = hgnn(args.layer_size)
-        qf.load_state_dict(torch.load("chkpt/job_shop/"+args.load_from))
+        qf.load_state_dict(torch.load("chkpt/fjsp/"+args.load_from))
         performance_eval(env, qf, args.n_samples, njobs+1)
         return
         
@@ -147,8 +147,8 @@ def main(args):
     qf = hgnn(args.layer_size, k=args.k)
     target_qf = hgnn(args.layer_size, k=args.k)
     if args.load_from:
-        qf.load_state_dict(torch.load("chkpt/job_shop/"+args.load_from))
-        target_qf.load_state_dict(torch.load("chkpt/job_shop/"+args.load_from))
+        qf.load_state_dict(torch.load("chkpt/fjsp/"+args.load_from))
+        target_qf.load_state_dict(torch.load("chkpt/fjsp/"+args.load_from))
         
     expl_policy = epsilonGreedyPolicy(qf, args.eps)
     eval_policy = epsilonGreedyPolicy(target_qf, 0.)
@@ -170,6 +170,17 @@ def main(args):
     avg_r_eval = []
     success_rates = []
     relative_errors = []
+
+    def save_logs(ep):
+        losses = [np.mean(loss[i*n_iter:(i+1)*n_iter]) for i in range(ep)]
+        stats = pd.DataFrame({'loss': losses, 
+                              'r_train': avg_r_train,
+                              'r_eval': avg_r_eval,
+                              'success_rates': success_rates,
+                              'relative_err':relative_errors
+                             })
+        stats.to_csv('data/fjsp/jobshop_qf_j%d-w%d.csv' % (njobs, nworkers))
+
 
     for i in range(n_epoch):
         qf.train(False)
@@ -222,13 +233,17 @@ def main(args):
               "| Success rate:", round(success_rate, err), 
               "| Makespan:", round(avg_makespan, err), 
               "| Rel. error:", round(relative_err, err), )
-
+        
+        if (i+1)%50 == 0:
+            save_logs(i+1)    
 
     target_qf.eval()
     if args.save:
         torch.save(target_qf.state_dict(), "chkpt/fjsp/jobshop_qf_j%d-w%d" % (njobs, nworkers))
     
     performance_eval(env, target_qf, args.n_samples//4, max_len)
+
+    save_logs(n_epoch)
 
     if args.plot:
         losses = [np.mean(loss[i*n_iter:(i+1)*n_iter]) for i in range(n_epoch)]

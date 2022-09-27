@@ -75,7 +75,7 @@ def sample_episode(env, agent, max_path_length:int=100):
     info = {}
     
     for _ in range(max_path_length):
-        a, _ = agent.get_action(obs)
+        a = agent.get_action(obs)
         nextobs, reward, done, info = env.step(a)
         
         observations.append(obs)

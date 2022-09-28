@@ -28,7 +28,29 @@ def get_random_queues(n: int, beta: float = 0.8):
             free[j] = False
             out.append([i, j])
             i = j
-    return out
+    return out, n
+
+def get_n_random_queues(n: int, beta: float = 0.8):
+    i, out = 0, []
+    for _ in range(n):
+        while np.random.rand() < beta:
+            out.append([i, i+1])
+            i = i+1
+        i = i+1
+    return out, i
+
+def get_n_random_queues_by_avg(n: int, n_avg: int = 3):
+    ops_per_job = [1]*n
+    for _ in range((n_avg-1)*n):
+        ops_per_job[np.random.randint(n)] += 1
+
+    i, out = 0, []
+    for nj in ops_per_job:
+        for _ in range(nj-1):
+            out.append([i, i+1])
+            i = i+1
+        i = i+1
+    return out, i
 
 def count_q_length(_from, _to, n):
     counts, prev_counts = torch.zeros(n), torch.zeros(n)
@@ -44,24 +66,25 @@ def get_random_intial_state(nw, nj):
     """
     Generate an inital graph / Job shop problem statement, including random dependencies between jobs.
     """
-    _from, _to = torch.tensor([[0, 0]]+get_random_queues(nj)).T
+    out, nops = get_n_random_queues_by_avg(nj)
+    _from, _to = torch.tensor([[0, 0]]+out).T
 
     graph_data = {
        ('job', 'precede', 'job'): (_from, _to), # A ---before---> B
-       ('job', 'next', 'job'): (torch.tensor([0]), torch.tensor([0])), # jobshop queue
+       ('job', 'next', 'job'): (torch.tensor([0]), torch.tensor([0])), # jobshop queue (torch.tensor([]), torch.tensor([]))
        ('worker', 'processing', 'job'): (torch.tensor([0]), torch.tensor([0])) # nothing is scheduled
     }
 
-    state = dgl.heterograph(graph_data, num_nodes_dict={'worker': nw, 'job': nj})
+    state = dgl.heterograph(graph_data, num_nodes_dict={'worker': nw, 'job': nops})
     # hack: can not init null vector for edges
     state.remove_edges(0, 'processing')
     state.remove_edges(0, 'precede')
     state.remove_edges(0, 'next')
 
-    times = 0.1*torch.randint(1, 10, (nj,1)) # torch.rand(nj,1)
+    times = 0.1*torch.randint(1, 10, (nops,1)) # torch.rand(nj,1)
     _from, _to = _from[1:], _to[1:]
-    counts = count_q_length(_from, _to, nj).unsqueeze(-1)
-    state.nodes['job'].data['hv'] = torch.cat((times, torch.zeros(nj, 1), counts, torch.zeros(nj, 3), times), 1)
+    counts = count_q_length(_from, _to, nops).unsqueeze(-1)
+    state.nodes['job'].data['hv'] = torch.cat((times, torch.zeros(nops, 1), counts, torch.zeros(nops, 3), times), 1)
     state.nodes['worker'].data['he'] = torch.cat((torch.zeros(nw,2), torch.ones(nw,1)), 1)
 
     return state
@@ -109,6 +132,7 @@ class jobShopScheduling(gym.Env):
     def __init__(self, njobs: int, nworkers: int):
         self._njobs = njobs
         self._nworkers = nworkers
+        self._noperations = None
         self._jfeat = 7
         self._wfeat = 3
         self._dt = 0.1
@@ -322,7 +346,7 @@ class jobShopScheduling(gym.Env):
         
         if done:
             r, success, makespan = self.rollout()
-            makespan += (self._njobs-1) #*self._dt
+            makespan += (self._noperations-1) #*self._dt
             reward += r
         
         return deepcopy(self._state), deepcopy(reward), deepcopy(done), {'success': success, 'makespan': makespan}
@@ -332,6 +356,7 @@ class jobShopScheduling(gym.Env):
             super().reset(seed=seed)
                 
         self._state = get_random_intial_state(self._nworkers, self._njobs)
+        self._noperations = self._state.num_nodes('job')
         return deepcopy(self._state)
     
     def dump_state_info(self):
@@ -352,7 +377,7 @@ class jobShopScheduling(gym.Env):
         
         G = dgl.to_homogeneous(self._state).to_networkx(edge_attrs=['_TYPE'])
         
-        node_color = ['red']*self._njobs+['orange']*self._nworkers
+        node_color = ['red']*self._noperations+['orange']*self._nworkers
         edge_color = ['red' if e[-1].item() % 2 else 'orange' for e in G.edges(data='_TYPE')]
         nx.draw(G, node_color=node_color, edge_color=edge_color, with_labels=True)
         

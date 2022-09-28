@@ -108,7 +108,6 @@ class hgnn(nn.Module):
             'next' : dglnn.GraphConv(embedding_dim, embedding_dim),
             'processing' : dglnn.SAGEConv((embedding_dim, embedding_dim), embedding_dim, 'mean')},
             aggregate='sum')
-               
         self.pred = dotProductPredictor()
         self.num_loops = k
         
@@ -121,7 +120,7 @@ class hgnn(nn.Module):
                   'worker': hw}
             
         rg = construct_readout_graph(g, ('worker', 'processing', 'job'))
-        return self.pred(rg, hv['job'], hw, ('worker', 'processing', 'job'))    
+        return self.pred(rg, hv['job'], hw, ('worker', 'processing', 'job'))
     
 # --------------- Agent
 from utils.policy_base import Policy
